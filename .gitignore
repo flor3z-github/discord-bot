@@ -31,6 +31,9 @@ go.work.sum
 data/
 *.db
 
+# Build output
+bin/
+
 # Editor/IDE
 # .idea/
 # .vscode/

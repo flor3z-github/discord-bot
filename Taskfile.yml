@@ -1,0 +1,81 @@
+version: '3'
+
+vars:
+  BINARY_NAME: lol-tracker
+  BINARY_PATH: ./bin/{{.BINARY_NAME}}
+  MAIN_PATH: ./cmd/bot
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the bot binary
+    cmds:
+      - go build -o {{.BINARY_PATH}} {{.MAIN_PATH}}
+    sources:
+      - ./**/*.go
+    generates:
+      - "{{.BINARY_PATH}}"
+
+  run:
+    desc: Run the bot
+    cmds:
+      - go run {{.MAIN_PATH}}
+
+  dev:
+    desc: Run with debug logging
+    env:
+      LOG_LEVEL: debug
+    cmds:
+      - go run {{.MAIN_PATH}}
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test -v ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "Coverage report generated at coverage.html"
+
+  lint:
+    desc: Run linter (requires golangci-lint)
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  tidy:
+    desc: Tidy go modules
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf ./bin
+      - rm -f coverage.out coverage.html
+      - rm -rf ./data/*.db
+
+  setup:
+    desc: Initial project setup
+    cmds:
+      - go mod tidy
+      - cp -n .env.example .env || true
+      - mkdir -p data
+      - echo "Setup complete! Edit .env with your API keys."
+
+  db:reset:
+    desc: Reset the database
+    cmds:
+      - rm -f ./data/bot.db
+      - echo "Database reset. Will be recreated on next run."
