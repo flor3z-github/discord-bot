@@ -37,3 +37,6 @@ bin/
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Task runner
+.task/
