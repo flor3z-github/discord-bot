@@ -1,29 +1,36 @@
-# LoL Match Tracker Discord Bot
+# Game Tracker Discord Bot
 
-A Discord bot that monitors League of Legends summoner match history and sends real-time notifications when new games are completed.
+A Discord bot that monitors player activity across multiple games and sends real-time notifications.
+
+## Supported Games
+
+- **League of Legends** - Track summoner match history with detailed stats (KDA, CS, damage, vision)
+- **MapleStory** - Track character level and experience progress
 
 ## Features
 
-- **Summoner Tracking** - Register summoners to monitor their match history
-- **Real-time Notifications** - Automatic alerts when tracked summoners complete a match
-- **Rich Embeds** - Color-coded match results with detailed stats (KDA, CS, damage, vision)
+- **Multi-Game Support** - Register players from different games
+- **Real-time Notifications** - Automatic alerts when tracked players have updates
+- **Rich Embeds** - Color-coded results with detailed game-specific stats
 - **Multi-server Support** - Works across multiple Discord servers with per-server settings
-- **Rate Limited** - Built-in Riot API rate limiting to prevent throttling
 
 ## Commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `/register <riot_id>` | Track a summoner's matches | `/register Faker#KR1` |
-| `/unregister <riot_id>` | Stop tracking a summoner | `/unregister Faker#KR1` |
-| `/list` | Show all tracked summoners | `/list` |
-| `/setchannel <channel>` | Set notification channel | `/setchannel #lol-updates` |
+| `/등록 <게임> <플레이어>` | Register a player for tracking | `/등록 lol Faker#KR1` |
+| `/해제 <게임> <플레이어>` | Stop tracking a player | `/해제 lol Faker#KR1` |
+| `/목록` | Show all tracked players | `/목록` |
+| `/채널설정 <채널>` | Set notification channel | `/채널설정 #game-updates` |
+| `/게임목록` | Show supported games | `/게임목록` |
+| `/최근 <게임> <플레이어>` | Show recent player status | `/최근 maplestory 캐릭터명` |
 
 ## Requirements
 
 - Go 1.21+
 - Discord Bot Token ([Discord Developer Portal](https://discord.com/developers/applications))
-- Riot API Key ([Riot Developer Portal](https://developer.riotgames.com/))
+- Riot API Key ([Riot Developer Portal](https://developer.riotgames.com/)) - for LoL
+- Nexon API Key ([Nexon Open API](https://openapi.nexon.com/)) - for MapleStory
 
 ## Quick Start
 
@@ -47,6 +54,7 @@ Edit `.env` with your credentials:
 ```env
 DISCORD_BOT_TOKEN=your_discord_bot_token
 RIOT_API_KEY=your_riot_api_key
+NEXON_API_KEY=your_nexon_api_key
 ```
 
 ### 3. Run the bot
@@ -61,9 +69,10 @@ go run ./cmd/bot
 |----------|-------------|---------|
 | `DISCORD_BOT_TOKEN` | Discord bot token (required) | - |
 | `DISCORD_APPLICATION_ID` | Discord application ID | - |
-| `RIOT_API_KEY` | Riot Games API key (required) | - |
+| `RIOT_API_KEY` | Riot Games API key (for LoL) | - |
+| `NEXON_API_KEY` | Nexon API key (for MapleStory) | - |
 | `DATABASE_PATH` | SQLite database file path | `./data/bot.db` |
-| `POLLING_INTERVAL_SECONDS` | Match check interval | `90` |
+| `POLLING_INTERVAL_SECONDS` | Status check interval | `90` |
 | `LOG_LEVEL` | Logging level (debug/info/warn/error) | `info` |
 
 ## Project Structure
@@ -78,15 +87,24 @@ discord-bot/
 │   │   └── commands.go      # Slash command handlers
 │   ├── config/
 │   │   └── config.go        # Environment configuration
+│   ├── game/
+│   │   ├── tracker.go       # Game tracker interface
+│   │   └── registry.go      # Game registry
+│   ├── games/
+│   │   ├── lol/             # League of Legends tracker
+│   │   └── maplestory/      # MapleStory tracker
 │   ├── riot/
-│   │   ├── client.go        # HTTP client with rate limiting
+│   │   ├── client.go        # Riot API client
 │   │   ├── account.go       # Account-V1 API
 │   │   └── match.go         # Match-V5 API
+│   ├── nexon/
+│   │   ├── client.go        # Nexon API client
+│   │   └── maplestory.go    # MapleStory API
 │   ├── storage/
 │   │   ├── models.go        # Data models
 │   │   └── repository.go    # SQLite operations
 │   └── poller/
-│       └── poller.go        # Background match polling
+│       └── poller.go        # Background polling
 ├── .env.example             # Environment template
 └── go.mod                   # Go module
 ```
@@ -102,18 +120,6 @@ discord-bot/
 7. Select scopes: `bot`, `applications.commands`
 8. Select permissions: `Send Messages`, `Embed Links`, `Use Slash Commands`
 9. Use the generated URL to invite the bot to your server
-
-## Regional Support
-
-Currently configured for **Korea (KR)** region using `asia.api.riotgames.com`.
-
-To support other regions, modify the `RegionalBaseURL` in `internal/riot/client.go`:
-
-| Region | Base URL |
-|--------|----------|
-| Korea, Japan, SEA | `asia.api.riotgames.com` |
-| NA, BR, LAN, LAS | `americas.api.riotgames.com` |
-| EU, TR, RU | `europe.api.riotgames.com` |
 
 ## License
 

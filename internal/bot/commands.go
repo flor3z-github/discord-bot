@@ -40,7 +40,7 @@ func (b *Bot) getCommands() []Command {
 		{
 			Definition: &discordgo.ApplicationCommand{
 				Name:        "등록",
-				Description: "플레이어를 등록하여 경기 기록을 추적합니다",
+				Description: "플레이어를 등록하여 게임 활동을 추적합니다",
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Type:        discordgo.ApplicationCommandOptionString,
@@ -62,7 +62,7 @@ func (b *Bot) getCommands() []Command {
 		{
 			Definition: &discordgo.ApplicationCommand{
 				Name:        "해제",
-				Description: "플레이어의 경기 기록 추적을 중지합니다",
+				Description: "플레이어의 게임 활동 추적을 중지합니다",
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Type:        discordgo.ApplicationCommandOptionString,
@@ -91,7 +91,7 @@ func (b *Bot) getCommands() []Command {
 		{
 			Definition: &discordgo.ApplicationCommand{
 				Name:        "채널설정",
-				Description: "경기 알림을 받을 채널 설정",
+				Description: "게임 알림을 받을 채널 설정",
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Type:        discordgo.ApplicationCommandOptionChannel,
@@ -109,14 +109,14 @@ func (b *Bot) getCommands() []Command {
 		{
 			Definition: &discordgo.ApplicationCommand{
 				Name:        "게임목록",
-				Description: "경기 추적이 가능한 게임 목록",
+				Description: "추적 가능한 게임 목록",
 			},
 			Handler: b.handleGames,
 		},
 		{
 			Definition: &discordgo.ApplicationCommand{
 				Name:        "최근",
-				Description: "플레이어의 가장 최근 경기/상태 정보를 조회합니다",
+				Description: "플레이어의 가장 최근 상태 정보를 조회합니다",
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Type:        discordgo.ApplicationCommandOptionString,
@@ -261,7 +261,7 @@ func (b *Bot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 
-	b.editResponse(s, i, fmt.Sprintf("`%s`를 %s 경기 추적에 성공적으로 등록했습니다!", summoner.RiotID, tracker.Name()))
+	b.editResponse(s, i, fmt.Sprintf("`%s`를 %s 추적에 성공적으로 등록했습니다!", summoner.RiotID, tracker.Name()))
 }
 
 // handleUnregister handles the /unregister command
@@ -360,7 +360,7 @@ func (b *Bot) handleSetChannel(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
-	respondWithMessage(s, i, fmt.Sprintf("경기 알림이 <#%s> 채널로 전송됩니다", channel.ID))
+	respondWithMessage(s, i, fmt.Sprintf("게임 알림이 <#%s> 채널로 전송됩니다", channel.ID))
 }
 
 // handleGames handles the /games command
