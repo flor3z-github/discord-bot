@@ -77,8 +77,8 @@ func (t *Tracker) ResolvePlayer(ctx context.Context, input string) (*game.Player
 	}, nil
 }
 
-// GetLatestMatchID retrieves the most recent match ID for a player
-func (t *Tracker) GetLatestMatchID(ctx context.Context, playerID string) (string, error) {
+// GetCurrentState returns the latest match ID for change detection
+func (t *Tracker) GetCurrentState(ctx context.Context, playerID string) (string, error) {
 	matchIDs, err := t.client.GetMatchIDsByPUUID(ctx, playerID, 1)
 	if err != nil {
 		return "", err
@@ -91,85 +91,25 @@ func (t *Tracker) GetLatestMatchID(ctx context.Context, playerID string) (string
 	return matchIDs[0], nil
 }
 
-// GetMatchDetails fetches detailed match information
-func (t *Tracker) GetMatchDetails(ctx context.Context, matchID string) (*game.MatchInfo, error) {
-	match, err := t.client.GetMatch(ctx, matchID)
+// CreateNotification fetches match details and creates a Discord embed
+func (t *Tracker) CreateNotification(ctx context.Context, playerID, playerName, stateID string) (*discordgo.MessageEmbed, error) {
+	// stateID is the match ID for LoL
+	match, err := t.client.GetMatch(ctx, stateID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("경기 정보를 가져올 수 없습니다: %w", err)
 	}
 
-	return &game.MatchInfo{
-		MatchID:  match.Metadata.MatchID,
-		GameType: game.GameTypeLoL,
-		EndTime:  match.Info.GameEndTimestamp,
-		RawData:  match,
-	}, nil
-}
-
-// FormatNotification creates a Discord embed for a match notification
-func (t *Tracker) FormatNotification(playerName string, matchInfo *game.MatchInfo) *discordgo.MessageEmbed {
-	match, ok := matchInfo.RawData.(*riot.Match)
-	if !ok {
-		return &discordgo.MessageEmbed{
-			Title:       "경기 결과",
-			Description: "경기 데이터 형식 오류",
-			Color:       0xFF0000,
-		}
-	}
-
-	// Find the player in the match
-	var participant *riot.Participant
-	for i := range match.Info.Participants {
-		p := &match.Info.Participants[i]
-		displayName := fmt.Sprintf("%s#%s", p.RiotIdGameName, p.RiotIdTagline)
-		if displayName == playerName {
-			participant = p
-			break
-		}
-	}
-
-	// If not found by display name, this might be a data format issue
-	if participant == nil {
-		return &discordgo.MessageEmbed{
-			Title:       "경기 결과",
-			Description: fmt.Sprintf("경기 데이터에서 플레이어 %s를 찾을 수 없습니다", playerName),
-			Color:       0xFF0000,
-		}
-	}
-
-	return createMatchEmbed(playerName, match, participant)
-}
-
-// FindParticipantByPUUID finds a participant in match data by PUUID
-func (t *Tracker) FindParticipantByPUUID(matchInfo *game.MatchInfo, puuid string) *riot.Participant {
-	match, ok := matchInfo.RawData.(*riot.Match)
-	if !ok {
-		return nil
-	}
-	return match.FindParticipant(puuid)
-}
-
-// FormatNotificationByPUUID creates a Discord embed using PUUID to find the player
-func (t *Tracker) FormatNotificationByPUUID(playerName string, matchInfo *game.MatchInfo, puuid string) *discordgo.MessageEmbed {
-	match, ok := matchInfo.RawData.(*riot.Match)
-	if !ok {
-		return &discordgo.MessageEmbed{
-			Title:       "경기 결과",
-			Description: "경기 데이터 형식 오류",
-			Color:       0xFF0000,
-		}
-	}
-
-	participant := match.FindParticipant(puuid)
+	// Find the player in the match by PUUID
+	participant := match.FindParticipant(playerID)
 	if participant == nil {
 		return &discordgo.MessageEmbed{
 			Title:       "경기 결과",
 			Description: "경기 데이터에서 플레이어를 찾을 수 없습니다",
 			Color:       0xFF0000,
-		}
+		}, nil
 	}
 
-	return createMatchEmbed(playerName, match, participant)
+	return createMatchEmbed(playerName, match, participant), nil
 }
 
 // createMatchEmbed creates a Discord embed for match notification

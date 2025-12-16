@@ -9,6 +9,7 @@ import (
 	"github.com/flor3z/discord-bot/internal/config"
 	"github.com/flor3z/discord-bot/internal/game"
 	"github.com/flor3z/discord-bot/internal/games/lol"
+	"github.com/flor3z/discord-bot/internal/games/maplestory"
 	"github.com/flor3z/discord-bot/internal/poller"
 	"github.com/flor3z/discord-bot/internal/storage"
 )
@@ -48,9 +49,12 @@ func New(cfg *config.Config) (*Bot, error) {
 	lolTracker := lol.NewTracker(cfg.RiotAPIKey)
 	registry.Register(lolTracker)
 
-	// Future games can be registered here:
-	// registry.Register(valorant.NewTracker(cfg.RiotAPIKey))
-	// registry.Register(tft.NewTracker(cfg.RiotAPIKey))
+	// Register MapleStory tracker (only if API key is configured)
+	if cfg.NexonAPIKey != "" {
+		maplestoryTracker := maplestory.NewTracker(cfg.NexonAPIKey)
+		registry.Register(maplestoryTracker)
+		slog.Info("MapleStory tracker registered")
+	}
 
 	b := &Bot{
 		config:   cfg,

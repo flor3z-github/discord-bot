@@ -17,6 +17,9 @@ type Config struct {
 	// Riot API
 	RiotAPIKey string
 
+	// Nexon API
+	NexonAPIKey string
+
 	// Database
 	DatabasePath string
 
@@ -36,6 +39,7 @@ func Load() (*Config, error) {
 		DiscordToken:         os.Getenv("DISCORD_BOT_TOKEN"),
 		DiscordApplicationID: os.Getenv("DISCORD_APPLICATION_ID"),
 		RiotAPIKey:           os.Getenv("RIOT_API_KEY"),
+		NexonAPIKey:          os.Getenv("NEXON_API_KEY"),
 		DatabasePath:         getEnvOrDefault("DATABASE_PATH", "./data/bot.db"),
 		LogLevel:             getEnvOrDefault("LOG_LEVEL", "info"),
 	}

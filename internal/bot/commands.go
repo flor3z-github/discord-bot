@@ -188,8 +188,8 @@ func (b *Bot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 
-	// Get initial match ID
-	lastMatchID, err := tracker.GetLatestMatchID(ctx, playerInfo.ID)
+	// Get initial state
+	lastMatchID, err := tracker.GetCurrentState(ctx, playerInfo.ID)
 	if err != nil {
 		slog.Warn("Failed to get initial match history", "playerID", playerInfo.ID, "error", err)
 		// Continue without last match ID - will be set on first poll

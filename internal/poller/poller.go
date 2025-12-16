@@ -8,11 +8,10 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/flor3z/discord-bot/internal/game"
-	"github.com/flor3z/discord-bot/internal/games/lol"
 	"github.com/flor3z/discord-bot/internal/storage"
 )
 
-// Poller periodically checks for new matches across all registered games
+// Poller periodically checks for state changes across all registered games
 type Poller struct {
 	repo     *storage.Repository
 	registry *game.Registry
@@ -36,7 +35,7 @@ func New(repo *storage.Repository, registry *game.Registry, discord *discordgo.S
 
 // Start begins the polling loop
 func (p *Poller) Start(ctx context.Context) {
-	slog.Info("Starting match poller", "interval", p.interval)
+	slog.Info("Starting poller", "interval", p.interval)
 
 	p.wg.Add(1)
 	defer p.wg.Done()
@@ -67,7 +66,7 @@ func (p *Poller) Stop() {
 	p.wg.Wait()
 }
 
-// poll checks all summoners for new matches
+// poll checks all players for state changes
 func (p *Poller) poll(ctx context.Context) {
 	summoners, err := p.repo.GetAllSummoners()
 	if err != nil {
@@ -92,7 +91,7 @@ func (p *Poller) poll(ctx context.Context) {
 	}
 }
 
-// checkSummoner checks a single summoner for new matches
+// checkSummoner checks a single player for state changes
 func (p *Poller) checkSummoner(ctx context.Context, summoner *storage.Summoner) {
 	// Get the appropriate tracker for this game
 	tracker, err := p.registry.Get(game.GameType(summoner.GameType))
@@ -101,50 +100,43 @@ func (p *Poller) checkSummoner(ctx context.Context, summoner *storage.Summoner) 
 		return
 	}
 
-	// Get latest match ID
-	latestMatchID, err := tracker.GetLatestMatchID(ctx, summoner.PUUID)
+	// Get current state
+	currentState, err := tracker.GetCurrentState(ctx, summoner.PUUID)
 	if err != nil {
-		slog.Error("Failed to get match IDs", "summoner", summoner.RiotID, "error", err)
+		slog.Error("Failed to get current state", "summoner", summoner.RiotID, "error", err)
 		return
 	}
 
-	if latestMatchID == "" {
+	if currentState == "" {
 		return
 	}
 
-	// Check if this is a new match
-	if latestMatchID == summoner.LastMatchID {
-		slog.Debug("No new matches", "summoner", summoner.RiotID)
+	// Check if state has changed
+	if currentState == summoner.LastMatchID {
+		slog.Debug("No state change", "summoner", summoner.RiotID)
 		return
 	}
 
-	// Skip if this is the first poll (no previous match recorded)
+	// Skip if this is the first poll (no previous state recorded)
 	if summoner.LastMatchID == "" {
-		slog.Info("Setting initial match ID", "summoner", summoner.RiotID, "matchID", latestMatchID)
-		p.repo.UpdateSummonerLastMatch(summoner.ID, latestMatchID)
+		slog.Info("Setting initial state", "summoner", summoner.RiotID, "state", currentState)
+		p.repo.UpdateSummonerLastMatch(summoner.ID, currentState)
 		return
 	}
 
-	slog.Info("New match detected", "summoner", summoner.RiotID, "matchID", latestMatchID)
-
-	// Fetch match details
-	matchInfo, err := tracker.GetMatchDetails(ctx, latestMatchID)
-	if err != nil {
-		slog.Error("Failed to get match details", "matchID", latestMatchID, "error", err)
-		return
-	}
+	slog.Info("State change detected", "summoner", summoner.RiotID, "newState", currentState)
 
 	// Send notifications to all subscribed guilds
-	p.sendNotifications(summoner, tracker, matchInfo)
+	p.sendNotifications(ctx, summoner, tracker, currentState)
 
-	// Update last match ID
-	if err := p.repo.UpdateSummonerLastMatch(summoner.ID, latestMatchID); err != nil {
-		slog.Error("Failed to update last match ID", "error", err)
+	// Update stored state
+	if err := p.repo.UpdateSummonerLastMatch(summoner.ID, currentState); err != nil {
+		slog.Error("Failed to update state", "error", err)
 	}
 }
 
-// sendNotifications sends match notifications to all subscribed guilds
-func (p *Poller) sendNotifications(summoner *storage.Summoner, tracker game.Tracker, matchInfo *game.MatchInfo) {
+// sendNotifications sends notifications to all subscribed guilds
+func (p *Poller) sendNotifications(ctx context.Context, summoner *storage.Summoner, tracker game.Tracker, stateID string) {
 	subs, err := p.repo.GetSubscriptionsBySummoner(summoner.ID)
 	if err != nil {
 		slog.Error("Failed to get subscriptions", "error", err)
@@ -158,20 +150,18 @@ func (p *Poller) sendNotifications(summoner *storage.Summoner, tracker game.Trac
 			continue
 		}
 
-		// Use game-specific formatter if available, otherwise use generic
-		var embed *discordgo.MessageEmbed
-		if lolTracker, ok := tracker.(*lol.Tracker); ok {
-			// Use LoL-specific method that can find participant by PUUID
-			embed = lolTracker.FormatNotificationByPUUID(summoner.RiotID, matchInfo, summoner.PUUID)
-		} else {
-			embed = tracker.FormatNotification(summoner.RiotID, matchInfo)
+		// Create notification using the unified interface
+		embed, err := tracker.CreateNotification(ctx, summoner.PUUID, summoner.RiotID, stateID)
+		if err != nil {
+			slog.Error("Failed to create notification", "summoner", summoner.RiotID, "error", err)
+			continue
 		}
 
 		_, err = p.discord.ChannelMessageSendEmbed(settings.NotificationChannelID, embed)
 		if err != nil {
 			slog.Error("Failed to send notification", "guildID", sub.GuildID, "error", err)
 		} else {
-			slog.Info("Sent match notification", "summoner", summoner.RiotID, "guildID", sub.GuildID)
+			slog.Info("Sent notification", "summoner", summoner.RiotID, "guildID", sub.GuildID)
 		}
 	}
 }
