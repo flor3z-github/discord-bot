@@ -21,6 +21,7 @@ type Bot struct {
 	registry *game.Registry
 	poller   *poller.Poller
 	commands []*discordgo.ApplicationCommand
+	handlers map[string]CommandHandler
 }
 
 // New creates a new Bot instance
@@ -125,18 +126,9 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	data := i.ApplicationCommandData()
 	slog.Debug("Received command", "command", data.Name, "guild", i.GuildID)
 
-	switch data.Name {
-	case "등록":
-		b.handleRegister(s, i)
-	case "해제":
-		b.handleUnregister(s, i)
-	case "목록":
-		b.handleList(s, i)
-	case "채널설정":
-		b.handleSetChannel(s, i)
-	case "게임목록":
-		b.handleGames(s, i)
-	default:
+	if handler, ok := b.handlers[data.Name]; ok {
+		handler(s, i)
+	} else {
 		slog.Warn("Unknown command", "command", data.Name)
 	}
 }

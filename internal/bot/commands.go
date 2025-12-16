@@ -12,6 +12,15 @@ import (
 	"github.com/flor3z/discord-bot/internal/storage"
 )
 
+// CommandHandler is a function that handles a slash command
+type CommandHandler func(s *discordgo.Session, i *discordgo.InteractionCreate)
+
+// Command represents a slash command with its definition and handler
+type Command struct {
+	Definition *discordgo.ApplicationCommand
+	Handler    CommandHandler
+}
+
 // buildGameChoices creates the game selection choices for slash commands
 func (b *Bot) buildGameChoices() []*discordgo.ApplicationCommandOptionChoice {
 	games := b.registry.List()
@@ -25,69 +34,84 @@ func (b *Bot) buildGameChoices() []*discordgo.ApplicationCommandOptionChoice {
 	return choices
 }
 
-// Slash command definitions
-func (b *Bot) getCommandDefinitions() []*discordgo.ApplicationCommand {
-	return []*discordgo.ApplicationCommand{
+// getCommands returns all command definitions with their handlers
+func (b *Bot) getCommands() []Command {
+	return []Command{
 		{
-			Name:        "등록",
-			Description: "플레이어를 등록하여 경기 기록을 추적합니다",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "게임",
-					Description: "추적할 게임 (예: lol)",
-					Required:    true,
-					Choices:     b.buildGameChoices(),
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "플레이어",
-					Description: "플레이어 ID (예: Faker#KR1)",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "해제",
-			Description: "플레이어의 경기 기록 추적을 중지합니다",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "게임",
-					Description: "게임 (예: lol)",
-					Required:    true,
-					Choices:     b.buildGameChoices(),
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "플레이어",
-					Description: "플레이어 ID (예: Faker#KR1)",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "목록",
-			Description: "이 서버에 등록된 모든 플레이어 목록",
-		},
-		{
-			Name:        "채널설정",
-			Description: "경기 알림을 받을 채널 설정",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionChannel,
-					Name:        "채널",
-					Description: "알림을 보낼 채널",
-					Required:    true,
-					ChannelTypes: []discordgo.ChannelType{
-						discordgo.ChannelTypeGuildText,
+			Definition: &discordgo.ApplicationCommand{
+				Name:        "등록",
+				Description: "플레이어를 등록하여 경기 기록을 추적합니다",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "게임",
+						Description: "추적할 게임 (예: lol)",
+						Required:    true,
+						Choices:     b.buildGameChoices(),
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "플레이어",
+						Description: "플레이어 ID (예: Faker#KR1)",
+						Required:    true,
 					},
 				},
 			},
+			Handler: b.handleRegister,
 		},
 		{
-			Name:        "게임목록",
-			Description: "경기 추적이 가능한 게임 목록",
+			Definition: &discordgo.ApplicationCommand{
+				Name:        "해제",
+				Description: "플레이어의 경기 기록 추적을 중지합니다",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "게임",
+						Description: "게임 (예: lol)",
+						Required:    true,
+						Choices:     b.buildGameChoices(),
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "플레이어",
+						Description: "플레이어 ID (예: Faker#KR1)",
+						Required:    true,
+					},
+				},
+			},
+			Handler: b.handleUnregister,
+		},
+		{
+			Definition: &discordgo.ApplicationCommand{
+				Name:        "목록",
+				Description: "이 서버에 등록된 모든 플레이어 목록",
+			},
+			Handler: b.handleList,
+		},
+		{
+			Definition: &discordgo.ApplicationCommand{
+				Name:        "채널설정",
+				Description: "경기 알림을 받을 채널 설정",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionChannel,
+						Name:        "채널",
+						Description: "알림을 보낼 채널",
+						Required:    true,
+						ChannelTypes: []discordgo.ChannelType{
+							discordgo.ChannelTypeGuildText,
+						},
+					},
+				},
+			},
+			Handler: b.handleSetChannel,
+		},
+		{
+			Definition: &discordgo.ApplicationCommand{
+				Name:        "게임목록",
+				Description: "경기 추적이 가능한 게임 목록",
+			},
+			Handler: b.handleGames,
 		},
 	}
 }
@@ -96,20 +120,22 @@ func (b *Bot) getCommandDefinitions() []*discordgo.ApplicationCommand {
 func (b *Bot) registerCommands() error {
 	slog.Info("Registering slash commands")
 
-	commandDefinitions := b.getCommandDefinitions()
-	registeredCommands := make([]*discordgo.ApplicationCommand, 0, len(commandDefinitions))
+	commands := b.getCommands()
+	registeredCommands := make([]*discordgo.ApplicationCommand, 0, len(commands))
+	b.handlers = make(map[string]CommandHandler)
 
-	for _, cmd := range commandDefinitions {
+	for _, cmd := range commands {
 		registered, err := b.session.ApplicationCommandCreate(
 			b.session.State.User.ID,
 			"", // Empty string = global command
-			cmd,
+			cmd.Definition,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to register command %s: %w", cmd.Name, err)
+			return fmt.Errorf("failed to register command %s: %w", cmd.Definition.Name, err)
 		}
 		registeredCommands = append(registeredCommands, registered)
-		slog.Debug("Registered command", "name", cmd.Name)
+		b.handlers[cmd.Definition.Name] = cmd.Handler
+		slog.Debug("Registered command", "name", cmd.Definition.Name)
 	}
 
 	b.commands = registeredCommands
