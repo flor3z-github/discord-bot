@@ -113,6 +113,28 @@ func (b *Bot) getCommands() []Command {
 			},
 			Handler: b.handleGames,
 		},
+		{
+			Definition: &discordgo.ApplicationCommand{
+				Name:        "최근",
+				Description: "플레이어의 가장 최근 경기/상태 정보를 조회합니다",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "게임",
+						Description: "조회할 게임 (예: lol)",
+						Required:    true,
+						Choices:     b.buildGameChoices(),
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "플레이어",
+						Description: "플레이어 ID (예: Faker#KR1)",
+						Required:    true,
+					},
+				},
+			},
+			Handler: b.handleRecent,
+		},
 	}
 }
 
@@ -361,6 +383,60 @@ func (b *Bot) handleGames(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	sb.WriteString("`/등록 게임:<게임> 플레이어:<ID>` 명령어로 추적을 시작하세요!")
 
 	respondWithMessage(s, i, sb.String())
+}
+
+// handleRecent handles the /최근 command - shows most recent tracker data
+func (b *Bot) handleRecent(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	gameType := options[0].StringValue()
+	playerID := options[1].StringValue()
+
+	// Respond immediately to avoid timeout
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+
+	// Get the tracker for this game
+	tracker, err := b.registry.Get(game.GameType(gameType))
+	if err != nil {
+		b.editResponse(s, i, fmt.Sprintf("알 수 없는 게임: `%s`. `/게임목록` 명령어로 지원되는 게임을 확인하세요.", gameType))
+		return
+	}
+
+	// Validate player ID format
+	if err := tracker.ValidatePlayerID(playerID); err != nil {
+		b.editResponse(s, i, fmt.Sprintf("잘못된 플레이어 ID 형식: %s", err.Error()))
+		return
+	}
+
+	// Find summoner in database
+	summoner, err := b.repo.GetSummonerByRiotIDAndGame(playerID, gameType)
+	if err != nil {
+		b.editResponse(s, i, fmt.Sprintf("플레이어 `%s`는 %s에 등록되어 있지 않습니다. `/등록` 명령어로 먼저 등록해주세요.", playerID, tracker.Name()))
+		return
+	}
+
+	// Check if we have stored state
+	if summoner.LastMatchID == "" {
+		b.editResponse(s, i, fmt.Sprintf("`%s`의 최근 데이터가 아직 없습니다. 잠시 후 다시 시도해주세요.", summoner.RiotID))
+		return
+	}
+
+	// Create notification embed using stored state
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	embed, err := tracker.CreateNotification(ctx, summoner.PUUID, summoner.RiotID, summoner.LastMatchID)
+	if err != nil {
+		slog.Error("Failed to create notification", "error", err)
+		b.editResponse(s, i, fmt.Sprintf("`%s`의 최근 데이터를 가져오는데 실패했습니다.", summoner.RiotID))
+		return
+	}
+
+	// Edit response with embed
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{embed},
+	})
 }
 
 // Helper functions
