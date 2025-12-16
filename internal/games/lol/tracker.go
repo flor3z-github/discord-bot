@@ -25,7 +25,7 @@ func NewTracker(apiKey string) *Tracker {
 
 // Name returns the human-readable name of the game
 func (t *Tracker) Name() string {
-	return "League of Legends"
+	return "리그 오브 레전드"
 }
 
 // Type returns the game type identifier
@@ -35,21 +35,21 @@ func (t *Tracker) Type() game.GameType {
 
 // Description returns a brief description of the game
 func (t *Tracker) Description() string {
-	return "Track match results for League of Legends summoners"
+	return "리그 오브 레전드 소환사의 경기 결과 추적"
 }
 
 // ValidatePlayerID validates the Riot ID format
 func (t *Tracker) ValidatePlayerID(input string) error {
 	parts := strings.Split(input, "#")
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid format: must be GameName#TagLine (e.g., Faker#KR1)")
+		return fmt.Errorf("잘못된 형식: 소환사명#태그 형식이어야 합니다 (예: Faker#KR1)")
 	}
 
 	gameName := strings.TrimSpace(parts[0])
 	tagLine := strings.TrimSpace(parts[1])
 
 	if gameName == "" || tagLine == "" {
-		return fmt.Errorf("game name and tag line cannot be empty")
+		return fmt.Errorf("소환사명과 태그는 비워둘 수 없습니다")
 	}
 
 	return nil
@@ -59,7 +59,7 @@ func (t *Tracker) ValidatePlayerID(input string) error {
 func (t *Tracker) ResolvePlayer(ctx context.Context, input string) (*game.PlayerInfo, error) {
 	parts := strings.Split(input, "#")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid Riot ID format")
+		return nil, fmt.Errorf("잘못된 Riot ID 형식")
 	}
 
 	gameName := strings.TrimSpace(parts[0])
@@ -67,7 +67,7 @@ func (t *Tracker) ResolvePlayer(ctx context.Context, input string) (*game.Player
 
 	account, err := t.client.GetAccountByRiotID(ctx, gameName, tagLine)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve player: %w", err)
+		return nil, fmt.Errorf("플레이어를 찾을 수 없습니다: %w", err)
 	}
 
 	return &game.PlayerInfo{
@@ -111,8 +111,8 @@ func (t *Tracker) FormatNotification(playerName string, matchInfo *game.MatchInf
 	match, ok := matchInfo.RawData.(*riot.Match)
 	if !ok {
 		return &discordgo.MessageEmbed{
-			Title:       "Match Result",
-			Description: "Error formatting match data",
+			Title:       "경기 결과",
+			Description: "경기 데이터 형식 오류",
 			Color:       0xFF0000,
 		}
 	}
@@ -131,8 +131,8 @@ func (t *Tracker) FormatNotification(playerName string, matchInfo *game.MatchInf
 	// If not found by display name, this might be a data format issue
 	if participant == nil {
 		return &discordgo.MessageEmbed{
-			Title:       "Match Result",
-			Description: fmt.Sprintf("Could not find player %s in match data", playerName),
+			Title:       "경기 결과",
+			Description: fmt.Sprintf("경기 데이터에서 플레이어 %s를 찾을 수 없습니다", playerName),
 			Color:       0xFF0000,
 		}
 	}
@@ -154,8 +154,8 @@ func (t *Tracker) FormatNotificationByPUUID(playerName string, matchInfo *game.M
 	match, ok := matchInfo.RawData.(*riot.Match)
 	if !ok {
 		return &discordgo.MessageEmbed{
-			Title:       "Match Result",
-			Description: "Error formatting match data",
+			Title:       "경기 결과",
+			Description: "경기 데이터 형식 오류",
 			Color:       0xFF0000,
 		}
 	}
@@ -163,8 +163,8 @@ func (t *Tracker) FormatNotificationByPUUID(playerName string, matchInfo *game.M
 	participant := match.FindParticipant(puuid)
 	if participant == nil {
 		return &discordgo.MessageEmbed{
-			Title:       "Match Result",
-			Description: fmt.Sprintf("Could not find player in match data"),
+			Title:       "경기 결과",
+			Description: "경기 데이터에서 플레이어를 찾을 수 없습니다",
 			Color:       0xFF0000,
 		}
 	}
@@ -176,10 +176,10 @@ func (t *Tracker) FormatNotificationByPUUID(playerName string, matchInfo *game.M
 func createMatchEmbed(playerName string, match *riot.Match, p *riot.Participant) *discordgo.MessageEmbed {
 	// Determine color based on win/loss
 	color := 0xE74C3C // Red for loss
-	resultText := "Defeat"
+	resultText := "패배"
 	if p.Win {
 		color = 0x2ECC71 // Green for win
-		resultText = "Victory"
+		resultText = "승리"
 	}
 
 	// Calculate KDA
@@ -216,28 +216,28 @@ func createMatchEmbed(playerName string, match *riot.Match, p *riot.Participant)
 				Inline: true,
 			},
 			{
-				Name:   "Damage",
+				Name:   "피해량",
 				Value:  formatNumber(p.TotalDamageDealtToChampions),
 				Inline: true,
 			},
 			{
-				Name:   "Gold",
+				Name:   "골드",
 				Value:  formatNumber(p.GoldEarned),
 				Inline: true,
 			},
 			{
-				Name:   "Vision",
+				Name:   "시야 점수",
 				Value:  fmt.Sprintf("%d", p.VisionScore),
 				Inline: true,
 			},
 			{
-				Name:   "Duration",
+				Name:   "경기 시간",
 				Value:  durationStr,
 				Inline: true,
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Match ID: %s", match.Metadata.MatchID),
+			Text: fmt.Sprintf("경기 ID: %s", match.Metadata.MatchID),
 		},
 		Timestamp: time.UnixMilli(match.Info.GameEndTimestamp).Format(time.RFC3339),
 	}
