@@ -126,15 +126,15 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	slog.Debug("Received command", "command", data.Name, "guild", i.GuildID)
 
 	switch data.Name {
-	case "register":
+	case "등록":
 		b.handleRegister(s, i)
-	case "unregister":
+	case "해제":
 		b.handleUnregister(s, i)
-	case "list":
+	case "목록":
 		b.handleList(s, i)
-	case "setchannel":
+	case "채널설정":
 		b.handleSetChannel(s, i)
-	case "games":
+	case "게임목록":
 		b.handleGames(s, i)
 	default:
 		slog.Warn("Unknown command", "command", data.Name)
