@@ -8,60 +8,95 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/flor3z/discord-bot/internal/game"
 	"github.com/flor3z/discord-bot/internal/storage"
 )
 
+// buildGameChoices creates the game selection choices for slash commands
+func (b *Bot) buildGameChoices() []*discordgo.ApplicationCommandOptionChoice {
+	games := b.registry.List()
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, len(games))
+	for i, g := range games {
+		choices[i] = &discordgo.ApplicationCommandOptionChoice{
+			Name:  g.Name,
+			Value: string(g.Type),
+		}
+	}
+	return choices
+}
+
 // Slash command definitions
-var commandDefinitions = []*discordgo.ApplicationCommand{
-	{
-		Name:        "register",
-		Description: "Register a summoner to track match history",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "riot_id",
-				Description: "Riot ID in format: GameName#TagLine (e.g., Faker#KR1)",
-				Required:    true,
-			},
-		},
-	},
-	{
-		Name:        "unregister",
-		Description: "Stop tracking a summoner's match history",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "riot_id",
-				Description: "Riot ID in format: GameName#TagLine (e.g., Faker#KR1)",
-				Required:    true,
-			},
-		},
-	},
-	{
-		Name:        "list",
-		Description: "List all registered summoners in this server",
-	},
-	{
-		Name:        "setchannel",
-		Description: "Set the channel for match notifications",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionChannel,
-				Name:        "channel",
-				Description: "The channel to send notifications to",
-				Required:    true,
-				ChannelTypes: []discordgo.ChannelType{
-					discordgo.ChannelTypeGuildText,
+func (b *Bot) getCommandDefinitions() []*discordgo.ApplicationCommand {
+	return []*discordgo.ApplicationCommand{
+		{
+			Name:        "register",
+			Description: "Register a player to track match history",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "game",
+					Description: "The game to track (e.g., lol)",
+					Required:    true,
+					Choices:     b.buildGameChoices(),
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "player_id",
+					Description: "Player identifier (e.g., Faker#KR1 for LoL)",
+					Required:    true,
 				},
 			},
 		},
-	},
+		{
+			Name:        "unregister",
+			Description: "Stop tracking a player's match history",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "game",
+					Description: "The game (e.g., lol)",
+					Required:    true,
+					Choices:     b.buildGameChoices(),
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "player_id",
+					Description: "Player identifier (e.g., Faker#KR1 for LoL)",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "list",
+			Description: "List all registered players in this server",
+		},
+		{
+			Name:        "setchannel",
+			Description: "Set the channel for match notifications",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionChannel,
+					Name:        "channel",
+					Description: "The channel to send notifications to",
+					Required:    true,
+					ChannelTypes: []discordgo.ChannelType{
+						discordgo.ChannelTypeGuildText,
+					},
+				},
+			},
+		},
+		{
+			Name:        "games",
+			Description: "List all supported games for match tracking",
+		},
+	}
 }
 
 // registerCommands registers all slash commands with Discord
 func (b *Bot) registerCommands() error {
 	slog.Info("Registering slash commands")
 
+	commandDefinitions := b.getCommandDefinitions()
 	registeredCommands := make([]*discordgo.ApplicationCommand, 0, len(commandDefinitions))
 
 	for _, cmd := range commandDefinitions {
@@ -94,47 +129,51 @@ func (b *Bot) removeCommands() {
 
 // handleRegister handles the /register command
 func (b *Bot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	riotID := i.ApplicationCommandData().Options[0].StringValue()
+	options := i.ApplicationCommandData().Options
+	gameType := options[0].StringValue()
+	playerID := options[1].StringValue()
 
 	// Respond immediately to avoid timeout
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 
-	// Parse Riot ID
-	gameName, tagLine, err := parseRiotID(riotID)
+	// Get the tracker for this game
+	tracker, err := b.registry.Get(game.GameType(gameType))
 	if err != nil {
-		b.editResponse(s, i, fmt.Sprintf("Invalid Riot ID format. Use: `GameName#TagLine` (e.g., `Faker#KR1`)"))
+		b.editResponse(s, i, fmt.Sprintf("Unknown game: `%s`. Use `/games` to see supported games.", gameType))
 		return
 	}
 
-	// Look up PUUID from Riot API
+	// Validate player ID format
+	if err := tracker.ValidatePlayerID(playerID); err != nil {
+		b.editResponse(s, i, fmt.Sprintf("Invalid player ID format: %s", err.Error()))
+		return
+	}
+
+	// Look up player from game API
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	account, err := b.riotClient.GetAccountByRiotID(ctx, gameName, tagLine)
+	playerInfo, err := tracker.ResolvePlayer(ctx, playerID)
 	if err != nil {
-		slog.Error("Failed to look up Riot account", "riotID", riotID, "error", err)
-		b.editResponse(s, i, fmt.Sprintf("Could not find summoner `%s`. Please check the Riot ID and try again.", riotID))
+		slog.Error("Failed to look up player", "playerID", playerID, "error", err)
+		b.editResponse(s, i, fmt.Sprintf("Could not find player `%s`. Please check the ID and try again.", playerID))
 		return
 	}
 
 	// Get initial match ID
-	matchIDs, err := b.riotClient.GetMatchIDsByPUUID(ctx, account.PUUID, 1)
+	lastMatchID, err := tracker.GetLatestMatchID(ctx, playerInfo.ID)
 	if err != nil {
-		slog.Warn("Failed to get initial match history", "puuid", account.PUUID, "error", err)
+		slog.Warn("Failed to get initial match history", "playerID", playerInfo.ID, "error", err)
 		// Continue without last match ID - will be set on first poll
-	}
-
-	lastMatchID := ""
-	if len(matchIDs) > 0 {
-		lastMatchID = matchIDs[0]
 	}
 
 	// Store summoner
 	summoner := &storage.Summoner{
-		PUUID:       account.PUUID,
-		RiotID:      fmt.Sprintf("%s#%s", account.GameName, account.TagLine),
+		PUUID:       playerInfo.ID,
+		RiotID:      playerInfo.DisplayName,
+		GameType:    string(playerInfo.GameType),
 		Region:      "KR", // Default to KR for now
 		LastMatchID: lastMatchID,
 	}
@@ -142,12 +181,19 @@ func (b *Bot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreat
 	if err := b.repo.CreateSummoner(summoner); err != nil {
 		// Check if already exists
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
-			b.editResponse(s, i, fmt.Sprintf("Summoner `%s` is already registered.", summoner.RiotID))
+			// Try to get existing summoner and add subscription
+			existing, _ := b.repo.GetSummonerByPUUIDAndGame(playerInfo.ID, string(playerInfo.GameType))
+			if existing != nil {
+				summoner = existing
+			} else {
+				b.editResponse(s, i, fmt.Sprintf("Player `%s` is already registered for %s.", summoner.RiotID, tracker.Name()))
+				return
+			}
+		} else {
+			slog.Error("Failed to save summoner", "error", err)
+			b.editResponse(s, i, "Failed to register player. Please try again.")
 			return
 		}
-		slog.Error("Failed to save summoner", "error", err)
-		b.editResponse(s, i, "Failed to register summoner. Please try again.")
-		return
 	}
 
 	// Create subscription for this guild
@@ -158,41 +204,52 @@ func (b *Bot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 
 	if err := b.repo.CreateSubscription(sub); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			b.editResponse(s, i, fmt.Sprintf("Player `%s` is already being tracked in this server for %s.", summoner.RiotID, tracker.Name()))
+			return
+		}
 		slog.Error("Failed to create subscription", "error", err)
-		b.editResponse(s, i, "Summoner saved but failed to create subscription.")
+		b.editResponse(s, i, "Player saved but failed to create subscription.")
 		return
 	}
 
-	b.editResponse(s, i, fmt.Sprintf("Successfully registered `%s` for match tracking!", summoner.RiotID))
+	b.editResponse(s, i, fmt.Sprintf("Successfully registered `%s` for %s match tracking!", summoner.RiotID, tracker.Name()))
 }
 
 // handleUnregister handles the /unregister command
 func (b *Bot) handleUnregister(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	riotID := i.ApplicationCommandData().Options[0].StringValue()
+	options := i.ApplicationCommandData().Options
+	gameType := options[0].StringValue()
+	playerID := options[1].StringValue()
 
-	// Parse and normalize Riot ID
-	gameName, tagLine, err := parseRiotID(riotID)
+	// Get the tracker for this game
+	tracker, err := b.registry.Get(game.GameType(gameType))
 	if err != nil {
-		respondWithMessage(s, i, "Invalid Riot ID format. Use: `GameName#TagLine`")
+		respondWithMessage(s, i, fmt.Sprintf("Unknown game: `%s`. Use `/games` to see supported games.", gameType))
 		return
 	}
-	normalizedRiotID := fmt.Sprintf("%s#%s", gameName, tagLine)
+
+	// Validate and normalize player ID
+	if err := tracker.ValidatePlayerID(playerID); err != nil {
+		respondWithMessage(s, i, fmt.Sprintf("Invalid player ID format: %s", err.Error()))
+		return
+	}
 
 	// Find summoner
-	summoner, err := b.repo.GetSummonerByRiotID(normalizedRiotID)
+	summoner, err := b.repo.GetSummonerByRiotIDAndGame(playerID, gameType)
 	if err != nil {
-		respondWithMessage(s, i, fmt.Sprintf("Summoner `%s` is not registered.", normalizedRiotID))
+		respondWithMessage(s, i, fmt.Sprintf("Player `%s` is not registered for %s.", playerID, tracker.Name()))
 		return
 	}
 
 	// Delete subscription for this guild
 	if err := b.repo.DeleteSubscription(summoner.ID, i.GuildID); err != nil {
 		slog.Error("Failed to delete subscription", "error", err)
-		respondWithMessage(s, i, "Failed to unregister summoner. Please try again.")
+		respondWithMessage(s, i, "Failed to unregister player. Please try again.")
 		return
 	}
 
-	respondWithMessage(s, i, fmt.Sprintf("Successfully unregistered `%s`.", normalizedRiotID))
+	respondWithMessage(s, i, fmt.Sprintf("Successfully unregistered `%s` from %s tracking.", playerID, tracker.Name()))
 }
 
 // handleList handles the /list command
@@ -200,20 +257,41 @@ func (b *Bot) handleList(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	summoners, err := b.repo.GetSummonersByGuild(i.GuildID)
 	if err != nil {
 		slog.Error("Failed to get summoners", "error", err)
-		respondWithMessage(s, i, "Failed to retrieve summoner list.")
+		respondWithMessage(s, i, "Failed to retrieve player list.")
 		return
 	}
 
 	if len(summoners) == 0 {
-		respondWithMessage(s, i, "No summoners are registered in this server.\nUse `/register` to add one!")
+		respondWithMessage(s, i, "No players are registered in this server.\nUse `/register` to add one!\nUse `/games` to see supported games.")
 		return
+	}
+
+	// Group summoners by game type
+	byGame := make(map[string][]*storage.Summoner)
+	for _, summoner := range summoners {
+		gameType := summoner.GameType
+		if gameType == "" {
+			gameType = "lol" // Legacy default
+		}
+		byGame[gameType] = append(byGame[gameType], summoner)
 	}
 
 	// Build list
 	var sb strings.Builder
-	sb.WriteString("**Registered Summoners:**\n")
-	for idx, summoner := range summoners {
-		sb.WriteString(fmt.Sprintf("%d. `%s`\n", idx+1, summoner.RiotID))
+	sb.WriteString("**Registered Players:**\n\n")
+
+	for gameType, players := range byGame {
+		// Get game name
+		gameName := gameType
+		if tracker, err := b.registry.Get(game.GameType(gameType)); err == nil {
+			gameName = tracker.Name()
+		}
+
+		sb.WriteString(fmt.Sprintf("**%s:**\n", gameName))
+		for idx, summoner := range players {
+			sb.WriteString(fmt.Sprintf("  %d. `%s`\n", idx+1, summoner.RiotID))
+		}
+		sb.WriteString("\n")
 	}
 
 	respondWithMessage(s, i, sb.String())
@@ -237,23 +315,29 @@ func (b *Bot) handleSetChannel(s *discordgo.Session, i *discordgo.InteractionCre
 	respondWithMessage(s, i, fmt.Sprintf("Match notifications will be sent to <#%s>", channel.ID))
 }
 
-// Helper functions
+// handleGames handles the /games command
+func (b *Bot) handleGames(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	games := b.registry.List()
 
-func parseRiotID(riotID string) (gameName, tagLine string, err error) {
-	parts := strings.Split(riotID, "#")
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid format: must contain exactly one '#'")
+	if len(games) == 0 {
+		respondWithMessage(s, i, "No games are currently supported.")
+		return
 	}
 
-	gameName = strings.TrimSpace(parts[0])
-	tagLine = strings.TrimSpace(parts[1])
+	var sb strings.Builder
+	sb.WriteString("**Supported Games:**\n\n")
 
-	if gameName == "" || tagLine == "" {
-		return "", "", fmt.Errorf("game name and tag line cannot be empty")
+	for _, g := range games {
+		sb.WriteString(fmt.Sprintf("**%s** (`%s`)\n", g.Name, g.Type))
+		sb.WriteString(fmt.Sprintf("  %s\n\n", g.Description))
 	}
 
-	return gameName, tagLine, nil
+	sb.WriteString("Use `/register game:<game> player_id:<id>` to start tracking!")
+
+	respondWithMessage(s, i, sb.String())
 }
+
+// Helper functions
 
 func respondWithMessage(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

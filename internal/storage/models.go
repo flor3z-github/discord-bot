@@ -2,11 +2,12 @@ package storage
 
 import "time"
 
-// Summoner represents a tracked League of Legends summoner
+// Summoner represents a tracked game player
 type Summoner struct {
 	ID          int64
-	PUUID       string
-	RiotID      string // GameName#TagLine
+	PUUID       string    // Unique player identifier (PUUID, Steam ID, etc.)
+	RiotID      string    // Display name (GameName#TagLine for Riot games)
+	GameType    string    // Game type identifier (lol, valorant, tft, etc.)
 	Region      string
 	LastMatchID string
 	CreatedAt   time.Time

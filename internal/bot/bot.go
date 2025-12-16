@@ -7,19 +7,20 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/flor3z/discord-bot/internal/config"
+	"github.com/flor3z/discord-bot/internal/game"
+	"github.com/flor3z/discord-bot/internal/games/lol"
 	"github.com/flor3z/discord-bot/internal/poller"
-	"github.com/flor3z/discord-bot/internal/riot"
 	"github.com/flor3z/discord-bot/internal/storage"
 )
 
 // Bot represents the Discord bot instance
 type Bot struct {
-	config     *config.Config
-	session    *discordgo.Session
-	repo       *storage.Repository
-	riotClient *riot.Client
-	poller     *poller.Poller
-	commands   []*discordgo.ApplicationCommand
+	config   *config.Config
+	session  *discordgo.Session
+	repo     *storage.Repository
+	registry *game.Registry
+	poller   *poller.Poller
+	commands []*discordgo.ApplicationCommand
 }
 
 // New creates a new Bot instance
@@ -39,14 +40,22 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("failed to initialize storage: %w", err)
 	}
 
-	// Initialize Riot API client
-	riotClient := riot.NewClient(cfg.RiotAPIKey)
+	// Initialize game registry and register trackers
+	registry := game.NewRegistry()
+
+	// Register League of Legends tracker
+	lolTracker := lol.NewTracker(cfg.RiotAPIKey)
+	registry.Register(lolTracker)
+
+	// Future games can be registered here:
+	// registry.Register(valorant.NewTracker(cfg.RiotAPIKey))
+	// registry.Register(tft.NewTracker(cfg.RiotAPIKey))
 
 	b := &Bot{
-		config:     cfg,
-		session:    session,
-		repo:       repo,
-		riotClient: riotClient,
+		config:   cfg,
+		session:  session,
+		repo:     repo,
+		registry: registry,
 	}
 
 	// Register command handlers
@@ -70,7 +79,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	}
 
 	// Start the match poller
-	b.poller = poller.New(b.repo, b.riotClient, b.session, b.config.PollingIntervalSeconds)
+	b.poller = poller.New(b.repo, b.registry, b.session, b.config.PollingIntervalSeconds)
 	go b.poller.Start(ctx)
 
 	return nil
@@ -125,6 +134,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		b.handleList(s, i)
 	case "setchannel":
 		b.handleSetChannel(s, i)
+	case "games":
+		b.handleGames(s, i)
 	default:
 		slog.Warn("Unknown command", "command", data.Name)
 	}

@@ -53,12 +53,14 @@ func (r *Repository) migrate() error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS summoners (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			puuid VARCHAR(100) UNIQUE NOT NULL,
+			puuid VARCHAR(100) NOT NULL,
 			riot_id VARCHAR(50) NOT NULL,
+			game_type VARCHAR(20) NOT NULL DEFAULT 'lol',
 			region VARCHAR(10) NOT NULL DEFAULT 'KR',
 			last_match_id VARCHAR(50),
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(puuid, game_type)
 		)`,
 		`CREATE TABLE IF NOT EXISTS guild_settings (
 			guild_id VARCHAR(20) PRIMARY KEY,
@@ -75,6 +77,7 @@ func (r *Repository) migrate() error {
 			UNIQUE(summoner_id, guild_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_summoners_puuid ON summoners(puuid)`,
+		`CREATE INDEX IF NOT EXISTS idx_summoners_game_type ON summoners(game_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscriptions_guild ON summoner_subscriptions(guild_id)`,
 	}
 
@@ -84,6 +87,9 @@ func (r *Repository) migrate() error {
 		}
 	}
 
+	// Add game_type column if it doesn't exist (for existing databases)
+	r.db.Exec(`ALTER TABLE summoners ADD COLUMN game_type VARCHAR(20) NOT NULL DEFAULT 'lol'`)
+
 	return nil
 }
 
@@ -91,9 +97,14 @@ func (r *Repository) migrate() error {
 
 // CreateSummoner inserts a new summoner
 func (r *Repository) CreateSummoner(s *Summoner) error {
+	// Default to lol if no game type specified
+	if s.GameType == "" {
+		s.GameType = "lol"
+	}
+
 	result, err := r.db.Exec(
-		`INSERT INTO summoners (puuid, riot_id, region, last_match_id) VALUES (?, ?, ?, ?)`,
-		s.PUUID, s.RiotID, s.Region, s.LastMatchID,
+		`INSERT INTO summoners (puuid, riot_id, game_type, region, last_match_id) VALUES (?, ?, ?, ?, ?)`,
+		s.PUUID, s.RiotID, s.GameType, s.Region, s.LastMatchID,
 	)
 	if err != nil {
 		return err
@@ -111,9 +122,22 @@ func (r *Repository) CreateSummoner(s *Summoner) error {
 func (r *Repository) GetSummonerByPUUID(puuid string) (*Summoner, error) {
 	s := &Summoner{}
 	err := r.db.QueryRow(
-		`SELECT id, puuid, riot_id, region, last_match_id, created_at, updated_at FROM summoners WHERE puuid = ?`,
+		`SELECT id, puuid, riot_id, game_type, region, last_match_id, created_at, updated_at FROM summoners WHERE puuid = ?`,
 		puuid,
-	).Scan(&s.ID, &s.PUUID, &s.RiotID, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt)
+	).Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// GetSummonerByPUUIDAndGame finds a summoner by PUUID and game type
+func (r *Repository) GetSummonerByPUUIDAndGame(puuid string, gameType string) (*Summoner, error) {
+	s := &Summoner{}
+	err := r.db.QueryRow(
+		`SELECT id, puuid, riot_id, game_type, region, last_match_id, created_at, updated_at FROM summoners WHERE puuid = ? AND game_type = ?`,
+		puuid, gameType,
+	).Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +148,22 @@ func (r *Repository) GetSummonerByPUUID(puuid string) (*Summoner, error) {
 func (r *Repository) GetSummonerByRiotID(riotID string) (*Summoner, error) {
 	s := &Summoner{}
 	err := r.db.QueryRow(
-		`SELECT id, puuid, riot_id, region, last_match_id, created_at, updated_at FROM summoners WHERE riot_id = ?`,
+		`SELECT id, puuid, riot_id, game_type, region, last_match_id, created_at, updated_at FROM summoners WHERE riot_id = ?`,
 		riotID,
-	).Scan(&s.ID, &s.PUUID, &s.RiotID, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt)
+	).Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// GetSummonerByRiotIDAndGame finds a summoner by Riot ID and game type
+func (r *Repository) GetSummonerByRiotIDAndGame(riotID string, gameType string) (*Summoner, error) {
+	s := &Summoner{}
+	err := r.db.QueryRow(
+		`SELECT id, puuid, riot_id, game_type, region, last_match_id, created_at, updated_at FROM summoners WHERE riot_id = ? AND game_type = ?`,
+		riotID, gameType,
+	).Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +182,7 @@ func (r *Repository) UpdateSummonerLastMatch(summonerID int64, matchID string) e
 // GetAllSummoners returns all summoners with their subscription info
 func (r *Repository) GetAllSummoners() ([]*Summoner, error) {
 	rows, err := r.db.Query(
-		`SELECT id, puuid, riot_id, region, last_match_id, created_at, updated_at FROM summoners`,
+		`SELECT id, puuid, riot_id, game_type, region, last_match_id, created_at, updated_at FROM summoners`,
 	)
 	if err != nil {
 		return nil, err
@@ -155,7 +192,30 @@ func (r *Repository) GetAllSummoners() ([]*Summoner, error) {
 	var summoners []*Summoner
 	for rows.Next() {
 		s := &Summoner{}
-		if err := rows.Scan(&s.ID, &s.PUUID, &s.RiotID, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		summoners = append(summoners, s)
+	}
+
+	return summoners, rows.Err()
+}
+
+// GetAllSummonersByGame returns all summoners for a specific game type
+func (r *Repository) GetAllSummonersByGame(gameType string) ([]*Summoner, error) {
+	rows, err := r.db.Query(
+		`SELECT id, puuid, riot_id, game_type, region, last_match_id, created_at, updated_at FROM summoners WHERE game_type = ?`,
+		gameType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summoners []*Summoner
+	for rows.Next() {
+		s := &Summoner{}
+		if err := rows.Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		summoners = append(summoners, s)
@@ -167,7 +227,7 @@ func (r *Repository) GetAllSummoners() ([]*Summoner, error) {
 // GetSummonersByGuild returns all summoners registered in a guild
 func (r *Repository) GetSummonersByGuild(guildID string) ([]*Summoner, error) {
 	rows, err := r.db.Query(
-		`SELECT s.id, s.puuid, s.riot_id, s.region, s.last_match_id, s.created_at, s.updated_at
+		`SELECT s.id, s.puuid, s.riot_id, s.game_type, s.region, s.last_match_id, s.created_at, s.updated_at
 		 FROM summoners s
 		 JOIN summoner_subscriptions sub ON s.id = sub.summoner_id
 		 WHERE sub.guild_id = ?`,
@@ -181,7 +241,7 @@ func (r *Repository) GetSummonersByGuild(guildID string) ([]*Summoner, error) {
 	var summoners []*Summoner
 	for rows.Next() {
 		s := &Summoner{}
-		if err := rows.Scan(&s.ID, &s.PUUID, &s.RiotID, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.PUUID, &s.RiotID, &s.GameType, &s.Region, &s.LastMatchID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		summoners = append(summoners, s)
